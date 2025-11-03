@@ -1,0 +1,635 @@
+prompts:
+  prompt:
+    input: give me an overview of the codebase
+    output: |
+      This is a RAG (Retrieval-Augmented Generation) Chatbot for querying educational course materials using AI.
+
+      Project Structure
+
+      starting-ragchatbot-codebase/
+      ├── backend/          # Python backend with RAG logic
+      ├── frontend/         # Web UI (HTML/CSS/JS)
+      ├── docs/            # Course transcripts (4 files)
+      ├── run.sh           # Startup script
+      └── pyproject.toml   # Dependencies
+
+      Core Technologies
+
+      Backend:
+      - FastAPI - Web framework
+      - Anthropic Claude Sonnet 4 - AI responses
+      - ChromaDB - Vector database for semantic search
+      - Sentence-Transformers - Text embeddings (all-MiniLM-L6-v2)
+      - Pydantic - Data validation
+
+      Frontend:
+      - Vanilla HTML/CSS/JavaScript
+      - Marked.js for markdown rendering
+
+      Key Components
+
+      Backend Files:
+      - backend/app.py:1 - FastAPI app with /api/query and /api/courses endpoints
+      - backend/rag_system.py:1 - Main orchestrator coordinating all components
+      - backend/vector_store.py:1 - ChromaDB vector database operations
+      - backend/document_processor.py:1 - Parses and chunks course documents
+      - backend/ai_generator.py:1 - Claude API integration with tool support
+      - backend/search_tools.py:1 - Tool-based search framework
+      - backend/session_manager.py:1 - Conversation history management
+      - backend/config.py:1 - Centralized configuration
+
+      Frontend:
+      - frontend/index.html:1 - Chat interface
+      - frontend/script.js:1 - API communication and UI logic
+      - frontend/style.css:1 - Styling
+
+      Architecture
+
+      The system uses a tool-based RAG approach where Claude decides when to search for information:
+
+      1. User asks question → FastAPI endpoint
+      2. RAGSystem orchestrates the request
+      3. Claude uses search tools to find relevant content
+      4. VectorStore performs semantic search in ChromaDB
+      5. Claude synthesizes answer from retrieved chunks
+      6. Response returned with source attribution
+
+      How to Run
+
+      ./run.sh  # Starts server on http://localhost:8000
+
+      The system loads course transcripts from /docs on startup, chunks them, and stores embeddings in ChromaDB for semantic search.
+
+  prompt:
+    input: how are these documents processed
+    output: |
+      The system processes documents in 4 main stages:
+
+      1. File Reading & Metadata Extraction (Lines 97-146)
+
+      Documents follow this structured format (from docs/course1_script.txt:1-6):
+      Course Title: Building Towards Computer Use with Anthropic
+      Course Link: https://www.deeplearning.ai/...
+      Course Instructor: Colt Steele
+
+      Lesson 0: Introduction
+      Lesson Link: https://learn.deeplearning.ai/...
+      [lesson content]
+
+      The parser extracts:
+      - Course Title - from line 1
+      - Course Link - from line 2
+      - Instructor - from line 3
+      - Creates a Course object with this metadata
+
+      2. Lesson Parsing (Lines 148-243)
+
+      The processor scans for lesson markers using regex:
+      # Matches: "Lesson 0: Introduction"
+      lesson_match = re.match(r'^Lesson\s+(\d+):\s*(.+)$', line.strip())
+
+      For each lesson found:
+      - Extracts lesson number and title
+      - Looks for optional "Lesson Link:" on next line
+      - Collects all content until the next lesson marker
+      - Creates Lesson objects attached to the course
+
+      3. Text Chunking (Lines 25-91)
+
+      The sentence-based chunking algorithm:
+
+      # Configuration from backend/config.py
+      chunk_size = 800 characters
+      chunk_overlap = 100 characters
+
+      Process:
+      1. Normalize whitespace - Clean up extra spaces/newlines
+      2. Split into sentences - Using regex that handles abbreviations (line 34):
+      # Looks for periods followed by space and capital letter
+      # Ignores abbreviations like "Dr." or "U.S."
+      3. Build chunks:
+        - Start with sentence i
+        - Keep adding sentences until reaching 800 chars
+        - Stop before exceeding limit (preserves sentence boundaries)
+      4. Apply overlap:
+        - Count backwards to find ~100 chars of overlap
+        - Next chunk starts that many sentences back
+        - Ensures context continuity between chunks
+
+      Example:
+      Chunk 1: [sentences 1-5] = 750 chars
+      Chunk 2: [sentences 4-8] = 780 chars  ← overlaps with sentences 4-5
+      Chunk 3: [sentences 7-11] = 800 chars ← overlaps with sentences 7-8
+
+      4. Creating CourseChunks (Lines 182-243)
+
+      For each chunk, the system adds contextual prefixes:
+
+      # First chunk of each lesson:
+      "Lesson {number} content: {chunk_text}"
+
+      # Subsequent chunks:  
+      "Course {title} Lesson {number} content: {chunk_text}"
+
+      Each CourseChunk object contains:
+      - content - The text with context prefix
+      - course_title - Which course it belongs to
+      - lesson_number - Which lesson (enables filtering)
+      - chunk_index - Sequential ordering
+
+      5. Vectorization & Storage
+
+      After processing, chunks are stored in ChromaDB:
+
+      1. Generate embeddings - Using all-MiniLM-L6-v2 model
+      2. Store in vector DB - Two collections:
+        - course_catalog - Course metadata
+        - course_content - Text chunks with embeddings
+      3. Enable semantic search - Queries find similar content via vector similarity
+
+      Example Processing Result
+
+      Input: docs/course1_script.txt (full course transcript)
+
+      Output:
+      - 1 Course object with metadata
+      - Multiple Lesson objects (Lesson 0, 1, 2...)
+      - ~100+ CourseChunk objects (800 chars each with 100 overlap)
+      - Each chunk embedded as 384-dimensional vector in ChromaDB
+
+      This chunking strategy balances:
+      - Retrieval precision - Smaller chunks = more specific results
+      - Context preservation - Overlap prevents information loss at boundaries
+      - Search performance - Fixed size enables efficient vector operations
+
+  prompt: 
+    input: trace the process of handling a users query from frontend to backend
+    output: |
+      
+      Stage 1: User Input (Frontend)
+
+      Location: frontend/script.js:45-96
+
+      // User types "What is prompt caching?" and hits send
+      sendMessage() {
+        query = "What is prompt caching?"
+        session_id = "abc123" // from previous conversation
+
+        // Send POST request
+        fetch('/api/query', {
+          method: 'POST',
+          body: JSON.stringify({
+            query: query,
+            session_id: session_id
+          })
+        })
+      }
+
+      Steps:
+      1. User types question in chat input (line 46)
+      2. Message added to UI as "user" message (line 55)
+      3. Loading spinner displayed (lines 58-60)
+      4. POST request sent to /api/query (line 63)
+
+      ---
+      Stage 2: API Endpoint (Backend Entry)
+
+      Location: backend/app.py:56-74
+
+      @app.post("/api/query")
+      async def query_documents(request: QueryRequest):
+          # 1. Get or create session
+          session_id = request.session_id or rag_system.session_manager.create_session()
+
+          # 2. Process query through RAG system
+          answer, sources = rag_system.query(request.query, session_id)
+
+          # 3. Return response
+          return QueryResponse(answer=answer, sources=sources, session_id=session_id)
+
+      Steps:
+      1. FastAPI receives POST to /api/query (line 56)
+      2. Parse request: query="What is prompt caching?", session_id="abc123"
+      3. Create session if needed (line 63)
+      4. Call rag_system.query() (line 66)
+
+      ---
+      Stage 3: RAG System Orchestration
+
+      Location: backend/rag_system.py:102-140
+
+      def query(self, query: str, session_id: str):
+          # 1. Build prompt
+          prompt = f"Answer this question about course materials: {query}"
+
+          # 2. Get conversation history
+          history = self.session_manager.get_conversation_history(session_id)
+          # Returns: "User: [previous question]\nAssistant: [previous answer]"
+
+          # 3. Generate response with tools
+          response = self.ai_generator.generate_response(
+              query=prompt,
+              conversation_history=history,
+              tools=self.tool_manager.get_tool_definitions(),
+              tool_manager=self.tool_manager
+          )
+
+          # 4. Get sources from last tool execution
+          sources = self.tool_manager.get_last_sources()
+
+          # 5. Update conversation history
+          self.session_manager.add_exchange(session_id, query, response)
+
+          return response, sources
+
+      Steps:
+      1. Wrap query in instructional prompt (line 114)
+      2. Retrieve previous conversation from session (lines 118-119)
+      3. Get tool definitions for Claude (line 125)
+      4. Call AI generator with tools (lines 122-127)
+      5. Extract sources after tool execution (line 130)
+
+      ---
+      Stage 4: AI Generation with Claude
+
+      Location: backend/ai_generator.py:43-87
+
+      def generate_response(self, query, conversation_history, tools, tool_manager):
+          # 1. Build system prompt with history
+          system_content = f"{SYSTEM_PROMPT}\n\nPrevious conversation:\n{conversation_history}"
+
+          # 2. Call Claude API with tools
+          response = self.client.messages.create(
+              model="claude-sonnet-4-20250514",
+              temperature=0,
+              max_tokens=800,
+              system=system_content,
+              messages=[{"role": "user", "content": query}],
+              tools=[{
+                  "name": "search_course_content",
+                  "description": "Search course materials...",
+                  "input_schema": {...}
+              }],
+              tool_choice={"type": "auto"}
+          )
+
+          # 3. Check if Claude wants to use a tool
+          if response.stop_reason == "tool_use":
+              return self._handle_tool_execution(response, api_params, tool_manager)
+
+          # 4. Return direct response if no tool needed
+          return response.content[0].text
+
+      Claude's Decision Process:
+      - Sees query: "What is prompt caching?"
+      - Recognizes it's a course-specific question
+      - Decides to use search_course_content tool
+      - Returns stop_reason="tool_use" with tool call
+
+      ---
+      Stage 5: Tool Execution
+
+      Location: backend/ai_generator.py:89-135
+
+      def _handle_tool_execution(self, initial_response, base_params, tool_manager):
+          # 1. Extract tool call from Claude's response
+          for content_block in initial_response.content:
+              if content_block.type == "tool_use":
+                  # content_block.name = "search_course_content"
+                  # content_block.input = {
+                  #     "query": "prompt caching",
+                  #     "course_name": None,
+                  #     "lesson_number": None
+                  # }
+
+                  # 2. Execute the tool
+                  tool_result = tool_manager.execute_tool(
+                      content_block.name,
+                      **content_block.input
+                  )
+
+          # 3. Send tool result back to Claude
+          messages = [
+              {"role": "user", "content": original_query},
+              {"role": "assistant", "content": initial_response.content},  # Tool use
+              {"role": "user", "content": tool_results}  # Tool results
+          ]
+
+          # 4. Get final response from Claude
+          final_response = self.client.messages.create(
+              messages=messages,
+              system=system_prompt
+          )
+
+          return final_response.content[0].text
+
+      ---
+      Stage 6: Vector Search
+
+      Location: backend/search_tools.py:52-86 → backend/vector_store.py:61-100
+
+      # CourseSearchTool.execute()
+      def execute(self, query, course_name, lesson_number):
+          # 1. Call vector store search
+          results = self.store.search(
+              query="prompt caching",
+              course_name=None,
+              lesson_number=None
+          )
+
+          # 2. Format results
+          return self._format_results(results)
+
+      # VectorStore.search()
+      def search(self, query, course_name, lesson_number):
+          # 1. No course filter needed (course_name is None)
+
+          # 2. Embed query using SentenceTransformer
+          query_embedding = embedding_model.encode("prompt caching")
+          # Returns 384-dimensional vector
+
+          # 3. Search ChromaDB
+          results = self.course_content.query(
+              query_texts=["prompt caching"],
+              n_results=5,  # max_results from config
+              where=None    # no filters
+          )
+
+          # Returns top 5 most similar chunks:
+          # [
+          #   {document: "Course ... Lesson 3 content: Prompt caching retains...",
+          #    metadata: {course_title: "Building Towards...", lesson_number: 3}},
+          #   {...}, {...}, {...}, {...}
+          # ]
+
+          return SearchResults.from_chroma(results)
+
+      Vector Search Process:
+      1. Query "prompt caching" embedded to 384D vector (line 94)
+      2. ChromaDB calculates cosine similarity with all chunk embeddings
+      3. Returns top 5 most similar chunks (lines 93-96)
+      4. Each result includes metadata: course title, lesson number
+
+      ---
+      Stage 7: Format Search Results
+
+      Location: backend/search_tools.py:88-114
+
+      def _format_results(self, results):
+          formatted = []
+          sources = []
+
+          for doc, meta in zip(results.documents, results.metadata):
+              course_title = meta['course_title']  # "Building Towards Computer Use..."
+              lesson_num = meta['lesson_number']   # 3
+
+              # Format result
+              header = f"[{course_title} - Lesson {lesson_num}]"
+              formatted.append(f"{header}\n{doc}")
+
+              # Track source for UI
+              sources.append(f"{course_title} - Lesson {lesson_num}")
+
+          # Store sources in tool for later retrieval
+          self.last_sources = sources  # Saved for UI display
+
+          return "\n\n".join(formatted)
+
+      Formatted Tool Result:
+      [Building Towards Computer Use... - Lesson 3]
+      Prompt caching retains some of the results of processing prompts between invocations...
+
+      [Building Towards Computer Use... - Lesson 3]
+      You also get to use the model to generate calls to external tools...
+
+      [... 3 more results ...]
+
+      ---
+      Stage 8: Claude Synthesizes Final Answer
+
+      Location: backend/ai_generator.py:134-135
+
+      Claude receives tool results and generates final response:
+
+      Input to Claude:
+      - System: "You are an AI assistant specialized in course materials..."
+      - User: "Answer this question: What is prompt caching?"
+      - Assistant: [tool_use: search_course_content]
+      - User: [tool_result: "...Prompt caching retains some results..."]
+
+      Output from Claude:
+      "Prompt caching is a feature that retains processing results between
+      model invocations to reduce cost and latency. When you have long prompts
+      or conversation histories that are repeatedly processed, prompt caching
+      stores intermediate results so they don't need to be reprocessed each time..."
+
+      ---
+      Stage 9: Return to RAG System
+
+      Location: backend/rag_system.py:129-140
+
+      # After AI generation completes:
+      response = "Prompt caching is a feature that..."
+      sources = self.tool_manager.get_last_sources()
+      # ["Building Towards... - Lesson 3", "Building Towards... - Lesson 3", ...]
+
+      # Update session history
+      self.session_manager.add_exchange(session_id, query, response)
+
+      # Clean up sources for next query
+      self.tool_manager.reset_sources()
+
+      return response, sources
+
+      ---
+      Stage 10: API Response
+
+      Location: backend/app.py:68-72
+
+      return QueryResponse(
+          answer="Prompt caching is a feature that...",
+          sources=["Building Towards... - Lesson 3", ...],
+          session_id="abc123"
+      )
+
+      JSON Response:
+      {
+        "answer": "Prompt caching is a feature that...",
+        "sources": [
+          "Building Towards Computer Use... - Lesson 3",
+          "Building Towards Computer Use... - Lesson 3"
+        ],
+        "session_id": "abc123"
+      }
+
+      ---
+      Stage 11: Frontend Display
+
+      Location: frontend/script.js:76-95
+
+      // 1. Receive response
+      const data = await response.json();
+
+      // 2. Remove loading spinner
+      loadingMessage.remove();
+
+      // 3. Display answer with sources
+      addMessage(data.answer, 'assistant', data.sources);
+
+      UI Display:
+      ┌─────────────────────────────────────────┐
+      │ Assistant                               │
+      │                                         │
+      │ Prompt caching is a feature that       │
+      │ retains processing results between     │
+      │ model invocations to reduce cost...    │
+      │                                         │
+      │ ▼ Sources                              │
+      │   Building Towards... - Lesson 3       │
+      └─────────────────────────────────────────┘
+
+      ---
+      Summary Flow Diagram
+
+      User Input
+          ↓
+      [Frontend] script.js → POST /api/query
+          ↓
+      [Backend] app.py:56 → FastAPI endpoint
+          ↓
+      [RAG] rag_system.py:102 → Get history + tools
+          ↓
+      [AI] ai_generator.py:43 → Call Claude API
+          ↓
+      [Claude] Decides to use search tool
+          ↓
+      [Tool] search_tools.py:52 → Execute search
+          ↓
+      [Vector] vector_store.py:61 → ChromaDB semantic search
+          ↓
+      [Vector] Returns 5 similar chunks with metadata
+          ↓
+      [Tool] Formats results + tracks sources
+          ↓
+      [AI] Claude receives tool results
+          ↓
+      [Claude] Synthesizes final answer
+          ↓
+      [RAG] Collects sources + updates history
+          ↓
+      [Backend] Returns JSON response
+          ↓
+      [Frontend] Displays answer + collapsible sources
+          ↓
+      User sees answer
+
+      Key Performance Notes:
+      - Session history limited to 2 exchanges (config)
+      - Max 5 search results returned (config)
+      - 800 char chunks with 100 char overlap
+      - Claude temperature = 0 (deterministic)
+      - Tool use is automatic (Claude decides when to search)
+
+  prompt: 
+    input: draw a digram that illustrates this flow
+    file: QUERY_FLOW_DIAGRAM.md
+    output: |
+      I've created a comprehensive visual diagram in QUERY_FLOW_DIAGRAM.md that traces the complete user query flow from frontend to backend and back!
+
+      Key Features of the Diagram:
+
+      📊 Visual Flow Chart showing:
+      - Each component layer (Frontend → API → RAG → AI → Tools → Vector DB)
+      - Specific function calls with file locations and line numbers
+      - Data transformations at each stage
+      - The critical two Claude API calls (first to decide on tool use, second to synthesize)
+
+      🔍 Detailed Sections Include:
+      - Frontend: User input → API request
+      - Backend API: Request parsing → RAG orchestration
+      - RAG System: History retrieval → Tool preparation
+      - AI Generator: Claude tool decision → Tool execution loop
+      - Tool Layer: Search execution → Result formatting
+      - Vector Search: ChromaDB query → Top 5 results
+      - Response Path: Synthesis → JSON response → UI display
+
+      ⏱️ Timing Breakdown: Typical ~1.5-3 seconds total
+
+      💡 Key Insights Highlighted:
+      - Two-stage Claude interaction (tool decision → synthesis)
+      - Vector embedding process (384 dimensions)
+      - Source tracking mechanism
+      - Session state management
+      - Data format transformations
+
+      The diagram makes it clear how this tool-based RAG differs from traditional RAG - Claude actively decides when to search rather than always receiving pre-fetched context!
+
+  prompt:
+    input: how do i run this application
+    output: |
+      Here's how to run the application:
+
+      Quick Start
+
+      # 1. Make sure you have an .env file with your API key
+      echo "ANTHROPIC_API_KEY=your_key_here" > .env
+
+      # 2. Install dependencies (if not already done)
+      uv sync
+
+      # 3. Run the application
+      ./run.sh
+
+      The app will start at http://localhost:8000
+
+      Prerequisites
+
+      If you don't have uv installed:
+      curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      If you need an Anthropic API key:
+      - Sign up at https://console.anthropic.com/
+      - Create an API key
+      - Add it to your .env file
+
+      Alternative: Manual Start
+
+      cd backend
+      uv run uvicorn app:app --reload --port 8000
+
+      What Happens on Startup
+
+      1. Creates ./chroma_db directory for vector storage
+      2. Loads course documents from ./docs folder
+      3. Processes and embeds documents into ChromaDB
+      4. Starts FastAPI server on port 8000
+      5. Serves frontend at root URL
+
+      Access Points
+
+      - Web Interface: http://localhost:8000
+      - API Documentation: http://localhost:8000/docs
+      - API Endpoints:
+        - POST /api/query - Ask questions
+        - GET /api/courses - Get course stats
+
+      Troubleshooting
+
+      Port already in use?
+      # Kill existing process on port 8000
+      lsof -ti:8000 | xargs kill -9
+
+      Missing API key error?
+      - Check .env file exists in root directory
+      - Verify key format: ANTHROPIC_API_KEY=sk-ant-...
+
+      Windows users: Use Git Bash to run the shell script.
+
+  prompt: 
+    input: /init
+
+  prompt:
+    input: /ide
+
+  prompt:
+    input: add and commit these changes
