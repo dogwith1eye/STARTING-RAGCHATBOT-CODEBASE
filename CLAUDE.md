@@ -157,3 +157,4 @@ Located in `ai_generator.py:SYSTEM_PROMPT` (lines 8-30). Key instructions:
 - Responses must be brief, educational, clear, example-supported
 - always use uv to run the server do not use pip directly
 - make sure to use uv to manage all dependencies
+- don't run the server using ./run.sh I will start it myself

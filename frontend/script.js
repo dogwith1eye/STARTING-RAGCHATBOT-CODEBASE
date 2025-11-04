@@ -5,7 +5,7 @@ const API_URL = '/api';
 let currentSessionId = null;
 
 // DOM elements
-let chatMessages, chatInput, sendButton, totalCourses, courseTitles;
+let chatMessages, chatInput, sendButton, totalCourses, courseTitles, newChatButton;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -15,7 +15,8 @@ document.addEventListener('DOMContentLoaded', () => {
     sendButton = document.getElementById('sendButton');
     totalCourses = document.getElementById('totalCourses');
     courseTitles = document.getElementById('courseTitles');
-    
+    newChatButton = document.getElementById('newChatButton');
+
     setupEventListeners();
     createNewSession();
     loadCourseStats();
@@ -28,8 +29,13 @@ function setupEventListeners() {
     chatInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') sendMessage();
     });
-    
-    
+
+    // New chat button
+    newChatButton.addEventListener('click', () => {
+        createNewSession();
+        chatInput.focus();
+    });
+
     // Suggested questions
     document.querySelectorAll('.suggested-item').forEach(button => {
         button.addEventListener('click', (e) => {
@@ -74,7 +80,7 @@ async function sendMessage() {
         if (!response.ok) throw new Error('Query failed');
 
         const data = await response.json();
-        
+
         // Update session ID if new
         if (!currentSessionId) {
             currentSessionId = data.session_id;
@@ -115,25 +121,47 @@ function addMessage(content, type, sources = null, isWelcome = false) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${type}${isWelcome ? ' welcome-message' : ''}`;
     messageDiv.id = `message-${messageId}`;
-    
+
     // Convert markdown to HTML for assistant messages
     const displayContent = type === 'assistant' ? marked.parse(content) : escapeHtml(content);
-    
+
     let html = `<div class="message-content">${displayContent}</div>`;
-    
+
     if (sources && sources.length > 0) {
+        // Format sources as clickable links or plain text
+        const formattedSources = sources.map(source => {
+            // Check if source is an object (new format)
+            if (typeof source === 'object' && source !== null && source.course_title) {
+                const displayText = source.lesson_number !== null && source.lesson_number !== undefined
+                    ? `${source.course_title} - Lesson ${source.lesson_number}`
+                    : source.course_title;
+
+                // Prioritize lesson link, fallback to course link
+                const link = source.lesson_link || source.course_link;
+
+                if (link) {
+                    return `<a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer" class="source-link">${escapeHtml(displayText)}</a>`;
+                } else {
+                    return `<span class="source-link">${escapeHtml(displayText)}</span>`;
+                }
+            } else {
+                // Backward compatibility: plain string sources
+                return `<span class="source-link">${escapeHtml(String(source))}</span>`;
+            }
+        }).join('');
+
         html += `
             <details class="sources-collapsible">
                 <summary class="sources-header">Sources</summary>
-                <div class="sources-content">${sources.join(', ')}</div>
+                <div class="sources-content">${formattedSources}</div>
             </details>
         `;
     }
-    
+
     messageDiv.innerHTML = html;
     chatMessages.appendChild(messageDiv);
     chatMessages.scrollTop = chatMessages.scrollHeight;
-    
+
     return messageId;
 }
 
@@ -158,15 +186,15 @@ async function loadCourseStats() {
         console.log('Loading course stats...');
         const response = await fetch(`${API_URL}/courses`);
         if (!response.ok) throw new Error('Failed to load course stats');
-        
+
         const data = await response.json();
         console.log('Course data received:', data);
-        
+
         // Update stats in UI
         if (totalCourses) {
             totalCourses.textContent = data.total_courses;
         }
-        
+
         // Update course titles
         if (courseTitles) {
             if (data.course_titles && data.course_titles.length > 0) {
@@ -177,7 +205,7 @@ async function loadCourseStats() {
                 courseTitles.innerHTML = '<span class="no-courses">No courses available</span>';
             }
         }
-        
+
     } catch (error) {
         console.error('Error loading course stats:', error);
         // Set default values on error
