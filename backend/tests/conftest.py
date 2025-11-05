@@ -3,10 +3,11 @@ Pytest configuration and shared fixtures for the RAG chatbot test suite.
 """
 
 import pytest
-from unittest.mock import Mock, MagicMock
+from unittest.mock import Mock, MagicMock, patch
 from typing import List, Dict, Any
 import sys
 from pathlib import Path
+from fastapi.testclient import TestClient
 
 # Add backend directory to path for imports
 backend_path = Path(__file__).parent.parent
@@ -272,3 +273,126 @@ def mock_tool_manager(sample_search_results):
     mock.reset_sources.return_value = None
 
     return mock
+
+
+# ============================================================================
+# FastAPI Test App and Client Fixtures
+# ============================================================================
+
+@pytest.fixture
+def test_app():
+    """
+    Create a test FastAPI app without static file mounting to avoid import issues.
+    This app only has the API endpoints for testing.
+    """
+    from fastapi import FastAPI, HTTPException
+    from fastapi.middleware.cors import CORSMiddleware
+    from pydantic import BaseModel
+    from typing import List, Optional, Dict, Any, Union
+
+    # Create a minimal test app
+    app = FastAPI(title="Test RAG System")
+
+    # Add CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Pydantic models
+    class QueryRequest(BaseModel):
+        query: str
+        session_id: Optional[str] = None
+
+    class QueryResponse(BaseModel):
+        answer: str
+        sources: List[Union[str, Dict[str, Any]]]
+        session_id: str
+
+    class CourseStats(BaseModel):
+        total_courses: int
+        course_titles: List[str]
+
+    # Store a mock RAG system on the app for tests to access
+    app.state.rag_system = None
+
+    # Define API endpoints inline
+    @app.post("/api/query", response_model=QueryResponse)
+    async def query_documents(request: QueryRequest):
+        """Process a query and return response with sources"""
+        try:
+            if not app.state.rag_system:
+                raise HTTPException(status_code=500, detail="RAG system not initialized")
+
+            session_id = request.session_id
+            if not session_id:
+                session_id = app.state.rag_system.session_manager.create_session()
+
+            answer, sources = app.state.rag_system.query(request.query, session_id)
+
+            return QueryResponse(
+                answer=answer,
+                sources=sources,
+                session_id=session_id
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/api/courses", response_model=CourseStats)
+    async def get_course_stats():
+        """Get course analytics and statistics"""
+        try:
+            if not app.state.rag_system:
+                raise HTTPException(status_code=500, detail="RAG system not initialized")
+
+            analytics = app.state.rag_system.get_course_analytics()
+            return CourseStats(
+                total_courses=analytics["total_courses"],
+                course_titles=analytics["course_titles"]
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    return app
+
+
+@pytest.fixture
+def mock_rag_system(mock_vector_store, mock_anthropic_client, mock_tool_manager):
+    """Mock RAGSystem for API testing"""
+    mock = Mock()
+    mock.session_manager.create_session.return_value = "test-session-123"
+    mock.query.return_value = (
+        "MCP is a protocol for AI communication with external data sources.",
+        [
+            {
+                "course_title": "Introduction to MCP",
+                "lesson_number": 0,
+                "lesson_link": "https://example.com/mcp/lesson0",
+                "course_link": "https://example.com/mcp"
+            }
+        ]
+    )
+    mock.get_course_analytics.return_value = {
+        "total_courses": 1,
+        "course_titles": ["Introduction to MCP"]
+    }
+    return mock
+
+
+@pytest.fixture
+def test_client(test_app, mock_rag_system):
+    """
+    Create a test client with a mocked RAG system.
+    This avoids issues with static file mounting and provides controlled test behavior.
+    """
+    test_app.state.rag_system = mock_rag_system
+    return TestClient(test_app)
+
+
+@pytest.fixture
+def test_client_no_rag(test_app):
+    """Test client without RAG system initialized (for error testing)"""
+    return TestClient(test_app)
