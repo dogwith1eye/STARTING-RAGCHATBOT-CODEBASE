@@ -9,16 +9,17 @@ Tests the CourseSearchTool and ToolManager to verify:
 5. Result formatting
 """
 
-import pytest
-from unittest.mock import Mock, patch
 import sys
 from pathlib import Path
+from unittest.mock import Mock, patch
+
+import pytest
 
 # Add backend to path
 backend_path = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_path))
 
-from search_tools import CourseSearchTool, CourseOutlineTool, ToolManager
+from search_tools import CourseOutlineTool, CourseSearchTool, ToolManager
 from vector_store import SearchResults
 
 
@@ -33,9 +34,7 @@ class TestCourseSearchToolExecute:
 
         # Verify search was called
         mock_vector_store.search.assert_called_once_with(
-            query="what is MCP",
-            course_name=None,
-            lesson_number=None
+            query="what is MCP", course_name=None, lesson_number=None
         )
 
         # Verify result is formatted correctly
@@ -52,9 +51,7 @@ class TestCourseSearchToolExecute:
 
         # Verify search was called with course filter
         mock_vector_store.search.assert_called_once_with(
-            query="what is MCP",
-            course_name="Introduction to MCP",
-            lesson_number=None
+            query="what is MCP", course_name="Introduction to MCP", lesson_number=None
         )
 
     def test_execute_with_lesson_filter(self, mock_vector_store, sample_search_results):
@@ -65,9 +62,7 @@ class TestCourseSearchToolExecute:
 
         # Verify search was called with lesson filter
         mock_vector_store.search.assert_called_once_with(
-            query="what is MCP",
-            course_name=None,
-            lesson_number=1
+            query="what is MCP", course_name=None, lesson_number=1
         )
 
     def test_execute_with_both_filters(self, mock_vector_store, sample_search_results):
@@ -75,16 +70,12 @@ class TestCourseSearchToolExecute:
         tool = CourseSearchTool(mock_vector_store)
 
         result = tool.execute(
-            query="what is MCP",
-            course_name="Introduction to MCP",
-            lesson_number=1
+            query="what is MCP", course_name="Introduction to MCP", lesson_number=1
         )
 
         # Verify search was called with both filters
         mock_vector_store.search.assert_called_once_with(
-            query="what is MCP",
-            course_name="Introduction to MCP",
-            lesson_number=1
+            query="what is MCP", course_name="Introduction to MCP", lesson_number=1
         )
 
     def test_execute_with_empty_results(self, mock_vector_store, empty_search_results):
@@ -97,15 +88,15 @@ class TestCourseSearchToolExecute:
         # Should return helpful message
         assert "No relevant content found" in result
 
-    def test_execute_with_empty_results_and_filters(self, mock_vector_store, empty_search_results):
+    def test_execute_with_empty_results_and_filters(
+        self, mock_vector_store, empty_search_results
+    ):
         """Test that execute includes filter info in empty results message"""
         mock_vector_store.search.return_value = empty_search_results
         tool = CourseSearchTool(mock_vector_store)
 
         result = tool.execute(
-            query="topic",
-            course_name="Introduction to MCP",
-            lesson_number=2
+            query="topic", course_name="Introduction to MCP", lesson_number=2
         )
 
         # Should mention the filters in the message
@@ -155,8 +146,10 @@ class TestCourseSearchToolExecute:
         # Create specific search results
         test_results = SearchResults(
             documents=["Content from lesson 1"],
-            metadata=[{"course_title": "Test Course", "lesson_number": 1, "chunk_index": 0}],
-            distances=[0.1]
+            metadata=[
+                {"course_title": "Test Course", "lesson_number": 1, "chunk_index": 0}
+            ],
+            distances=[0.1],
         )
         mock_vector_store.search.return_value = test_results
 
@@ -167,7 +160,9 @@ class TestCourseSearchToolExecute:
         assert "[Test Course - Lesson 1]" in result
         assert "Content from lesson 1" in result
 
-    def test_execute_with_zero_max_results_bug(self, mock_vector_store_with_zero_max_results):
+    def test_execute_with_zero_max_results_bug(
+        self, mock_vector_store_with_zero_max_results
+    ):
         """
         CRITICAL TEST: Reproduces the MAX_RESULTS=0 bug
 
@@ -206,15 +201,19 @@ class TestCourseOutlineTool:
 
         # Mock the catalog response
         mock_vector_store.course_catalog.get.return_value = {
-            'metadatas': [{
-                'title': 'Introduction to MCP',
-                'course_link': 'https://example.com/mcp',
-                'instructor': 'Test Instructor',
-                'lessons_json': json.dumps([
-                    {"lesson_number": 0, "lesson_title": "Getting Started"},
-                    {"lesson_number": 1, "lesson_title": "Core Concepts"}
-                ])
-            }]
+            "metadatas": [
+                {
+                    "title": "Introduction to MCP",
+                    "course_link": "https://example.com/mcp",
+                    "instructor": "Test Instructor",
+                    "lessons_json": json.dumps(
+                        [
+                            {"lesson_number": 0, "lesson_title": "Getting Started"},
+                            {"lesson_number": 1, "lesson_title": "Core Concepts"},
+                        ]
+                    ),
+                }
+            ]
         }
 
         tool = CourseOutlineTool(mock_vector_store)
